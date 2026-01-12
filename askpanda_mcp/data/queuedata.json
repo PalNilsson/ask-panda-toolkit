@@ -1,0 +1,12 @@
+{
+  "BNL-ATLAS": {
+    "status": "online",
+    "cloud": "US",
+    "notes": "Dummy example site"
+  },
+  "CERN-PROD": {
+    "status": "online",
+    "cloud": "CERN",
+    "notes": "Dummy example site"
+  }
+}

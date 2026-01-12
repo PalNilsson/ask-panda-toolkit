@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "askpanda-mcp"
+version = "0.1.0"
+description = "AskPanDA implemented as an MCP server (skeleton)."
+requires-python = ">=3.10"
+dependencies = ["mcp>=0.9.0", "python-dotenv>=1.0.0"]
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["askpanda_mcp*"]
