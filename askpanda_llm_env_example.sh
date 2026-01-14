@@ -2,7 +2,7 @@
 #
 # Example environment configuration for AskPanDA LLM support
 # Copy this file, remove `_example`, and fill in the API keys as needed.
-#
+# Remember to add this file to your .gitignore to avoid committing sensitive information.
 
 ########################################
 # LLM PROFILE SELECTION
