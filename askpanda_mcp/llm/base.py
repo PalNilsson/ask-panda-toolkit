@@ -20,6 +20,10 @@ class LLMClient(ABC):
     def __init__(self, model_spec: ModelSpec) -> None:
         self._model_spec = model_spec
 
+    async def close(self) -> None:
+        """Closes any underlying network resources."""
+        return
+
     @property
     def model_spec(self) -> ModelSpec:
         """Returns the model spec used by this client."""
