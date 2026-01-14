@@ -6,6 +6,8 @@ cd /Users/nilsnilsson/Development/mcp/ask-panda-toolkit
 export PYTHONPATH=$PWD
 streamlit run interfaces/streamlit/chat.py
 
+Set API keys before running.
+
 Start MCP server (stdio)
 
 From repo root:
