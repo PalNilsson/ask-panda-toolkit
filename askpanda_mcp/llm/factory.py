@@ -11,6 +11,7 @@ from askpanda_mcp.llm.types import ModelSpec
 from askpanda_mcp.llm.providers.anthropic_client import AnthropicLLMClient
 from askpanda_mcp.llm.providers.gemini_client import GeminiLLMClient
 from askpanda_mcp.llm.providers.openai_client import OpenAILLMClient
+from askpanda_mcp.llm.providers.mistral_client import MistralLLMClient
 from askpanda_mcp.llm.providers.openai_compat_client import OpenAICompatLLMClient
 
 
@@ -18,6 +19,7 @@ _PROVIDER_MAP: Dict[str, Type[LLMClient]] = {
     "openai": OpenAILLMClient,
     "anthropic": AnthropicLLMClient,
     "gemini": GeminiLLMClient,
+    "mistral": MistralLLMClient,
     "openai_compat": OpenAICompatLLMClient,
 }
 
