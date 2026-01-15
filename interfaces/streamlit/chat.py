@@ -457,6 +457,15 @@ def _chat_panel(mcp: MCPClientSync, tool_names: Sequence[str]) -> None:
     if not question:
         return
 
+    # For initial end-to-end testing (and later optional bypass), we can forward
+    # the full prompt to the default LLM without tool routing.
+    bypass_routing = st.session_state.get("bypass_routing", True)
+    st.session_state["bypass_routing"] = st.toggle(
+        "Bypass tool routing (send directly to default LLM)",
+        value=bool(bypass_routing),
+        help="Useful for sanity-checking LLM configuration and as a future escape hatch.",
+    )
+
     # Add user message
     st.session_state["messages"].append({"role": "user", "content": question})
 
@@ -466,9 +475,15 @@ def _chat_panel(mcp: MCPClientSync, tool_names: Sequence[str]) -> None:
     # Produce assistant answer by calling a tool
     with st.chat_message("assistant"):
         try:
-            tool, args = _guess_auto_tool(question, tool_names)
-            st.caption(f"Auto tool: `{tool}`")
-            result = mcp.call_tool(tool, args)
+            if st.session_state["bypass_routing"]:
+                tool = "askpanda_llm_answer"
+                st.caption(f"Direct LLM tool: `{tool}`")
+                # Send full chat history (user+assistant messages) to the server.
+                result = mcp.call_tool(tool, {"messages": st.session_state["messages"]})
+            else:
+                tool, args = _guess_auto_tool(question, tool_names)
+                st.caption(f"Auto tool: `{tool}`")
+                result = mcp.call_tool(tool, args)
             answer = _extract_text_from_content(result)
             if not answer.strip():
                 answer = "(Tool returned no text content.)"
