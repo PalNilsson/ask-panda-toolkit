@@ -47,6 +47,63 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import streamlit as st
 
+# --- UI tweaks: pin chat input to bottom and neutralize focus styling ---
+st.markdown(
+        """
+        <style>
+  /* ChatGPT-like pinned input at the bottom, but avoid overlapping the sidebar */
+  [data-testid="stChatInput"] {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 9999;
+    background: var(--background-color, #fff);
+    padding: 0.75rem 1rem 0.75rem 1rem;
+    border-top: none !important; /* remove separator line */
+    box-shadow: none !important;
+  }
+
+  /* When a sidebar is present, Streamlit typically reserves ~21rem on the left.
+     This prevents the input from sliding underneath the left panel. */
+  [data-testid="stChatInput"] {
+    padding-left: calc(1rem + 21rem);
+  }
+
+  /* On smaller screens (or when sidebar overlays), don't reserve left space. */
+  @media (max-width: 900px) {
+    [data-testid="stChatInput"] {
+      padding-left: 1rem;
+    }
+  }
+
+  /* Give the main content room so it doesn't hide behind the fixed input */
+  .block-container {
+    padding-bottom: 6.5rem !important;
+  }
+
+  /* Aggressively neutralize focus styles to avoid red borders/rings */
+  [data-testid="stChatInput"] *:focus,
+  [data-testid="stChatInput"] *:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
+  /* Ensure the textarea border stays neutral even on focus */
+  [data-testid="stChatInput"] textarea,
+  [data-testid="stChatInput"] input {
+    border-color: rgba(128,128,128,0.35) !important;
+  }
+  [data-testid="stChatInput"] textarea:focus,
+  [data-testid="stChatInput"] textarea:focus-visible,
+  [data-testid="stChatInput"] input:focus,
+  [data-testid="stChatInput"] input:focus-visible {
+    border-color: rgba(128,128,128,0.45) !important;
+  }
+</style>
+        """,
+        unsafe_allow_html=True,
+    )
 from interfaces.shared.mcp_client import MCPClientSync, MCPServerConfig
 
 
@@ -368,6 +425,16 @@ def _sidebar_config() -> UIConfig:
         st.cache_resource.clear()
         st.rerun()
 
+    # End-to-end test / escape hatch: bypass tool routing and send the full chat
+    # (including history) directly to the default LLM profile.
+    if "bypass_routing" not in st.session_state:
+        st.session_state["bypass_routing"] = True
+    st.sidebar.toggle(
+        "Bypass tool routing (send directly to default LLM)",
+        key="bypass_routing",
+        help="Useful for sanity-checking LLM configuration and as a future escape hatch.",
+    )
+
     return UIConfig(
         transport=transport,
         stdio_command=stdio_command,
@@ -437,67 +504,70 @@ def _manual_tool_panel(mcp: MCPClientSync, tool_names: Sequence[str]) -> None:
 
 
 def _chat_panel(mcp: MCPClientSync, tool_names: Sequence[str]) -> None:
-    """Render a simple chat interface backed by tool calls.
+    """Renders the main chat UI.
+
+    This implementation keeps the chat input fixed at the bottom by:
+    - recording the submitted user message and triggering a rerun
+    - generating the assistant response on the *next* run before rendering history
 
     Args:
-        mcp: MCP client.
-        tool_names: Available tool names (used for auto routing).
+        mcp: Connected MCP client (sync wrapper).
+        tool_names: List of available tool names.
     """
     st.subheader("Chat")
 
     if "messages" not in st.session_state:
         st.session_state["messages"] = []  # type: ignore[assignment]
 
+    # If we have a pending assistant response, generate it first so it appears
+    # in the history above the input box (ChatGPT-style).
+    if st.session_state.get("_pending_assistant", False):
+        st.session_state["_pending_assistant"] = False
+
+        with st.spinner("Thinking…"):
+            try:
+                if st.session_state.get("bypass_routing", True):
+                    tool = "askpanda_llm_answer"
+                    result = mcp.call_tool(tool, {"messages": st.session_state["messages"]})
+                else:
+                    # Use the most recent user message as the routing hint.
+                    last_user = next(
+                        (m["content"] for m in reversed(st.session_state["messages"]) if m.get("role") == "user"),
+                        "",
+                    )
+                    tool, args = _guess_auto_tool(last_user, tool_names)
+                    result = mcp.call_tool(tool, args)
+
+                answer = _extract_text_from_content(result)
+                if not answer.strip():
+                    answer = "(Tool returned no text content.)"
+            except Exception as e:  # noqa: BLE001
+                answer = f"Tool call failed: {e}"
+
+        st.session_state["messages"].append({"role": "assistant", "content": answer})  # type: ignore[index]
+        # Rerun once more so the assistant message is rendered as part of history
+        # and the input stays at the bottom.
+        st.rerun()
+
     # Show chat history
     for msg in st.session_state["messages"]:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
+    # Chat input should be the last UI element so it stays at the bottom.
     question = st.chat_input("Ask AskPanDA…")
-    if not question:
-        return
 
-    # For initial end-to-end testing (and later optional bypass), we can forward
-    # the full prompt to the default LLM without tool routing.
-    bypass_routing = st.session_state.get("bypass_routing", True)
-    st.session_state["bypass_routing"] = st.toggle(
-        "Bypass tool routing (send directly to default LLM)",
-        value=bool(bypass_routing),
-        help="Useful for sanity-checking LLM configuration and as a future escape hatch.",
-    )
-
-    # Add user message
-    st.session_state["messages"].append({"role": "user", "content": question})
-
-    with st.chat_message("user"):
-        st.markdown(question)
-
-    # Produce assistant answer by calling a tool
-    with st.chat_message("assistant"):
-        try:
-            if st.session_state["bypass_routing"]:
-                tool = "askpanda_llm_answer"
-                st.caption(f"Direct LLM tool: `{tool}`")
-                # Send full chat history (user+assistant messages) to the server.
-                result = mcp.call_tool(tool, {"messages": st.session_state["messages"]})
-            else:
-                tool, args = _guess_auto_tool(question, tool_names)
-                st.caption(f"Auto tool: `{tool}`")
-                result = mcp.call_tool(tool, args)
-            answer = _extract_text_from_content(result)
-            if not answer.strip():
-                answer = "(Tool returned no text content.)"
-            st.markdown(answer)
-        except Exception as e:
-            answer = f"Tool call failed: {e}"
-            st.error(answer)
-
-    st.session_state["messages"].append({"role": "assistant", "content": answer})
+    if question:
+        st.session_state["messages"].append({"role": "user", "content": question})  # type: ignore[index]
+        st.session_state["_pending_assistant"] = True
+        st.rerun()
 
 
 def main() -> None:
     """Main Streamlit entrypoint."""
     st.set_page_config(page_title="AskPanDA (MCP)", layout="wide")
+
+    # Style tweaks: remove the red focus border on the chat input.
     st.title("AskPanDA (MCP-first)")
 
     cfg = _sidebar_config()

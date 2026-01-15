@@ -1,12 +1,19 @@
 """LLM configuration loader.
 
-This module converts application configuration into a :class:`~askpanda_mcp.llm.registry.ModelRegistry`.
+This module converts application configuration (env vars and/or a Config object)
+into a :class:`~askpanda_mcp.llm.registry.ModelRegistry`.
+
+Precedence:
+  1) Environment variables (LLM_*), if set and non-empty
+  2) Attributes on the provided `config` object
+  3) Defaults defined in this module
 """
 
 from __future__ import annotations
 
 import json
-from typing import Any, Mapping, MutableMapping
+import os
+from typing import Any, Mapping
 
 from askpanda_mcp.llm.registry import ModelRegistry
 from askpanda_mcp.llm.types import ModelSpec
@@ -15,25 +22,34 @@ from askpanda_mcp.llm.types import ModelSpec
 _MISSING: object = object()
 
 
-def _cfg_get(config: object, name: str, default: object = _MISSING) -> Any:
-    """Gets an attribute from either a config instance or a config class.
+def _get(config: Any, name: str, default: Any = _MISSING) -> Any:
+    """Gets a configuration value, preferring environment variables.
 
     Args:
-        config: Config instance or class-like object.
-        name: Attribute name.
-        default: Default value if attribute is not present.
+        config: Config object or module with attributes.
+        name: Attribute / environment variable name.
+        default: Default to return if not found.
 
     Returns:
-        Attribute value.
+        The resolved value.
 
     Raises:
-        AttributeError: If the attribute is missing and no default was provided.
+        AttributeError: If missing and no default is provided.
     """
+    env_val = os.getenv(name)
+    if env_val is not None and env_val != "":
+        return env_val
+
     if hasattr(config, name):
-        return getattr(config, name)
+        val = getattr(config, name)
+        # Treat empty strings as "unset" so env/default can take over.
+        if val is not None and val != "":
+            return val
+
     if default is not _MISSING:
         return default
-    raise AttributeError(f"Missing config attribute: {name}")
+
+    raise AttributeError(f"Missing config value: {name}")
 
 
 def _parse_profiles_json(value: str) -> dict[str, ModelSpec]:
@@ -56,105 +72,71 @@ def _parse_profiles_json(value: str) -> dict[str, ModelSpec]:
 
     Returns:
         Mapping of profile names to ModelSpec objects.
-
-    Raises:
-        ValueError: If JSON is invalid or required keys are missing.
     """
-    raw: Mapping[str, Any] = json.loads(value)
-    profiles: dict[str, ModelSpec] = {}
+    raw = json.loads(value)
+    if not isinstance(raw, dict):
+        raise ValueError("LLM_PROFILES_JSON must be a JSON object")
 
-    for profile_name, spec in raw.items():
-        if not isinstance(spec, Mapping):
-            raise ValueError(f"Profile '{profile_name}' must be an object.")
-        provider = spec.get("provider")
-        model = spec.get("model")
+    profiles: dict[str, ModelSpec] = {}
+    for profile_name, spec_dict in raw.items():
+        if not isinstance(spec_dict, dict):
+            raise ValueError(f"Profile '{profile_name}' must be an object")
+        provider = str(spec_dict.get("provider", "")).strip()
+        model = str(spec_dict.get("model", "")).strip()
         if not provider or not model:
-            raise ValueError(f"Profile '{profile_name}' must include 'provider' and 'model'.")
+            raise ValueError(f"Profile '{profile_name}' must include provider and model")
+
         profiles[profile_name] = ModelSpec(
-            provider=str(provider),
-            model=str(model),
-            base_url=spec.get("base_url"),
-            api_key_env=spec.get("api_key_env"),
-            extra=dict(spec.get("extra", {})) if spec.get("extra") else None,
+            provider=provider,
+            model=model,
+            base_url=spec_dict.get("base_url"),
+            api_key_env=spec_dict.get("api_key_env"),
+            extra=spec_dict.get("extra") or {},
         )
+
     return profiles
 
 
-def build_model_registry_from_config(config: object) -> ModelRegistry:
+def build_model_registry_from_config(config: Any) -> ModelRegistry:
     """Builds a ModelRegistry from application configuration.
 
-    Supports two config styles:
+    This supports two configuration modes:
 
-    1) JSON mapping (recommended when you add more profiles):
-       - ``LLM_PROFILES_JSON``: JSON string defining profiles.
-       E.g. export LLM_PROFILES_JSON='{
-          "default": {"provider":"mistral","model":"mistral-large-latest"},
-          "fast": {"provider":"mistral","model":"mistral-large-latest"},
-          "reasoning": {"provider":"mistral","model":"mistral-large-latest"}
-          }'
-    2) Simple per-profile fields (minimal / env-friendly):
-       - ``LLM_DEFAULT_PROVIDER`` / ``LLM_DEFAULT_MODEL``
-       - ``LLM_FAST_PROVIDER`` / ``LLM_FAST_MODEL``
-       - ``LLM_REASONING_PROVIDER`` / ``LLM_REASONING_MODEL``
-
-    Also supports ``OPENAI_COMPAT_BASE_URL`` for providers using OpenAI-compatible
-    endpoints (e.g., vLLM/Ollama/LM Studio).
+    1) JSON mode (recommended for later): set LLM_PROFILES_JSON
+    2) Env/attribute mode (Option A): set LLM_DEFAULT_PROVIDER/MODEL, etc.
 
     Args:
-        config: Config instance or class-like object exposing attributes.
+        config: Global application configuration object (class, module, or instance).
 
     Returns:
-        ModelRegistry containing at least the ``default`` profile.
-
-    Raises:
-        ValueError: If required configuration is missing or invalid.
+        A ModelRegistry.
     """
-    profiles: MutableMapping[str, ModelSpec]
+    profiles_json = os.getenv("LLM_PROFILES_JSON") or getattr(config, "LLM_PROFILES_JSON", "")
+    profiles_json = str(profiles_json or "").strip()
 
-    profiles_json = _cfg_get(config, "LLM_PROFILES_JSON", "")
-    if isinstance(profiles_json, str) and profiles_json.strip():
-        profiles = _parse_profiles_json(profiles_json.strip())
+    if profiles_json:
+        profiles = _parse_profiles_json(profiles_json)
     else:
-        default_provider = _cfg_get(config, "LLM_DEFAULT_PROVIDER", None)
-        default_model = _cfg_get(config, "LLM_DEFAULT_MODEL", None)
-        if not default_provider or not default_model:
-            raise ValueError(
-                "LLM profile configuration missing. Provide LLM_PROFILES_JSON, or set "
-                "LLM_DEFAULT_PROVIDER and LLM_DEFAULT_MODEL (and optionally FAST/REASONING). "
-                "Example: LLM_DEFAULT_PROVIDER='mistral', LLM_DEFAULT_MODEL='mistral-large-latest'."
-            )
+        default_provider = str(_get(config, "LLM_DEFAULT_PROVIDER", "openai")).strip()
+        default_model = str(_get(config, "LLM_DEFAULT_MODEL", "gpt-4.1-mini")).strip()
+
+        fast_provider = str(_get(config, "LLM_FAST_PROVIDER", default_provider)).strip()
+        fast_model = str(_get(config, "LLM_FAST_MODEL", default_model)).strip()
+
+        reasoning_provider = str(_get(config, "LLM_REASONING_PROVIDER", default_provider)).strip()
+        reasoning_model = str(_get(config, "LLM_REASONING_MODEL", default_model)).strip()
 
         profiles = {
-            "default": ModelSpec(provider=str(default_provider), model=str(default_model)),
-            "fast": ModelSpec(
-                provider=str(_cfg_get(config, "LLM_FAST_PROVIDER", default_provider)),
-                model=str(_cfg_get(config, "LLM_FAST_MODEL", default_model)),
-            ),
-            "reasoning": ModelSpec(
-                provider=str(_cfg_get(config, "LLM_REASONING_PROVIDER", default_provider)),
-                model=str(_cfg_get(config, "LLM_REASONING_MODEL", default_model)),
-            ),
+            "default": ModelSpec(provider=default_provider, model=default_model),
+            "fast": ModelSpec(provider=fast_provider, model=fast_model),
+            "reasoning": ModelSpec(provider=reasoning_provider, model=reasoning_model),
         }
 
-    openai_compat_base_url = _cfg_get(config, "OPENAI_COMPAT_BASE_URL", "")
-    if isinstance(openai_compat_base_url, str) and openai_compat_base_url.strip():
-        base_url = openai_compat_base_url.strip()
-        profiles = {
-            name: (
-                ModelSpec(
-                    provider=spec.provider,
-                    model=spec.model,
-                    base_url=base_url,
-                    api_key_env=spec.api_key_env,
-                    extra=spec.extra,
-                )
-                if spec.provider == "openai_compat" and not spec.base_url
-                else spec
-            )
-            for name, spec in profiles.items()
-        }
+    # If using openai_compat, allow a global base URL to be supplied.
+    compat_base_url = str(_get(config, "ASKPANDA_OPENAI_COMPAT_BASE_URL", "") or "").strip()
+    if compat_base_url:
+        for spec in profiles.values():
+            if spec.provider == "openai_compat" and not spec.base_url:
+                spec.base_url = compat_base_url
 
-    if "default" not in profiles:
-        raise ValueError("ModelRegistry must define a 'default' profile.")
-
-    return ModelRegistry(profiles=dict(profiles))
+    return ModelRegistry(profiles=profiles)

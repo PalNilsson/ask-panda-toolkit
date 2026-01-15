@@ -87,6 +87,7 @@ class LLMPassthroughTool:
             raise RuntimeError("LLM selector does not expose a registry.")
 
         model_spec = registry.get(default_profile)
+        debug = f"[LLM selected] provider={model_spec.provider} model={model_spec.model}"
         client = await manager.get_client(model_spec)
 
         temperature = float(arguments.get("temperature", 0.2))
@@ -112,7 +113,7 @@ class LLMPassthroughTool:
             messages.append({"role": "user", "content": question})
 
         resp = await client.generate(messages=messages, params=GenerateParams(temperature=temperature, max_tokens=max_tokens_int))
-        return text_content(resp.text)
+        return text_content(f"{debug}\n\n{resp.text}")
 
 
 def _coerce_messages(raw: Sequence[Any]) -> List[Message]:
