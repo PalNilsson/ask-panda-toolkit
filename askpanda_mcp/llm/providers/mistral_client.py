@@ -134,13 +134,17 @@ class MistralLLMClient(LLMClient):
                     try:
                         u = getattr(res, "usage", None)
                         if u is not None:
-                            usage = TokenUsage(
-                                input_tokens=getattr(u, "prompt_tokens", None) or getattr(u, "input_tokens", None),
-                                output_tokens=getattr(u, "completion_tokens", None)
-                                or getattr(u, "output_tokens", None),
-                                total_tokens=getattr(u, "total_tokens", None),
+                            input_tokens = getattr(u, "prompt_tokens", None) or getattr(u, "input_tokens", None)
+                            output_tokens = (
+                                getattr(u, "completion_tokens", None) or getattr(u, "output_tokens", None)
                             )
-                    except Exception:
+                            total_tokens = getattr(u, "total_tokens", None)
+                            usage = TokenUsage(
+                                input_tokens=input_tokens,
+                                output_tokens=output_tokens,
+                                total_tokens=total_tokens,
+                            )
+                    except Exception:  # pragma: no cover - best-effort parsing
                         usage = None
 
                     return LLMResponse(text=text, usage=usage, raw=res)

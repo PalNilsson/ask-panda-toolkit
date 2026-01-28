@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Mapping
+from typing import Any
 
 from askpanda_mcp.llm.registry import ModelRegistry
 from askpanda_mcp.llm.types import ModelSpec

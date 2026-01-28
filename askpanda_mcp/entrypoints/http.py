@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from typing import Any, Awaitable, Callable, Dict, MutableMapping, Optional, Tuple
+from typing import Any, Awaitable, Callable, MutableMapping
 from urllib.parse import parse_qs
 
 from mcp.server.streamable_http import StreamableHTTPServerTransport
@@ -38,9 +38,9 @@ Send = Callable[[MutableMapping[str, Any]], Awaitable[None]]
 server = create_server()
 
 # Per-session state
-_transports: Dict[str, StreamableHTTPServerTransport] = {}
-_tasks: Dict[str, asyncio.Task[None]] = {}
-_ready: Dict[str, asyncio.Event] = {}
+_transports: dict[str, StreamableHTTPServerTransport] = {}
+_tasks: dict[str, asyncio.Task[None]] = {}
+_ready: dict[str, asyncio.Event] = {}
 
 _lock = asyncio.Lock()
 
@@ -72,8 +72,9 @@ async def _shutdown() -> None:
         try:
             await task
         except asyncio.CancelledError:
+            # Task was cancelled as part of shutdown - ignore.
             pass
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             # Best-effort shutdown: ignore unexpected task errors.
             pass
 
@@ -87,11 +88,12 @@ async def _shutdown() -> None:
     if llm_manager is not None and hasattr(llm_manager, "close_all"):
         try:
             await llm_manager.close_all()  # type: ignore[func-returns-value]
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
+            # If closing fails, ignore - best-effort cleanup.
             pass
 
 
-def _get_session_id_from_scope(scope: Scope) -> Optional[str]:
+def _get_session_id_from_scope(scope: Scope) -> str | None:
     """Extract MCP session id from ASGI scope headers or query string.
 
     Args:
@@ -105,7 +107,7 @@ def _get_session_id_from_scope(scope: Scope) -> Optional[str]:
         if k.lower() in _SESSION_HEADERS:
             try:
                 return v.decode("utf-8").strip()
-            except Exception:
+            except UnicodeDecodeError:  # pragma: no cover - decoding may fail for malformed headers
                 return None
 
     qs = scope.get("query_string") or b""
@@ -141,10 +143,9 @@ async def _run_session(session_id: str, transport: StreamableHTTPServerTransport
 
             if isinstance(streams, tuple) and len(streams) >= 2:
                 read_stream, write_stream = streams[0], streams[1]
-            else:
-                if hasattr(streams, "read_stream") and hasattr(streams, "write_stream"):
-                    read_stream = getattr(streams, "read_stream")
-                    write_stream = getattr(streams, "write_stream")
+            elif hasattr(streams, "read_stream") and hasattr(streams, "write_stream"):
+                read_stream = getattr(streams, "read_stream")
+                write_stream = getattr(streams, "write_stream")
 
             if read_stream is None or write_stream is None:
                 raise TypeError(
@@ -154,9 +155,6 @@ async def _run_session(session_id: str, transport: StreamableHTTPServerTransport
 
             await server.run(read_stream, write_stream, server.create_initialization_options())
 
-    except asyncio.CancelledError:
-        # Normal during shutdown / eviction
-        raise
     finally:
         # Cleanup session state
         async with _lock:
@@ -167,7 +165,7 @@ async def _run_session(session_id: str, transport: StreamableHTTPServerTransport
             _ = task
 
 
-async def _ensure_session(session_id: str) -> Tuple[StreamableHTTPServerTransport, asyncio.Event]:
+async def _ensure_session(session_id: str) -> tuple[StreamableHTTPServerTransport, asyncio.Event]:
     """Ensure transport/connect task exist for a given session id.
 
     Creates a transport and launches a background task that enters connect() and
@@ -215,7 +213,7 @@ async def _send_plain_text(send: Send, status: int, body: str) -> None:
     await send({"type": "http.response.body", "body": data})
 
 
-async def app(scope: Scope, receive: Receive, send: Send) -> None:
+async def app(scope: Scope, receive: Receive, send: Send) -> None:  # pylint: disable=too-complex
     """ASGI application entrypoint.
 
     Routes:

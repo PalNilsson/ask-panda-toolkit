@@ -1,5 +1,6 @@
 """Exceptions for LLM providers."""
 
+
 class LLMError(RuntimeError):
     """Base exception for all LLM provider errors."""
 

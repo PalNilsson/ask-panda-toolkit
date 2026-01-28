@@ -4,12 +4,14 @@ In MCP, prompts are a discoverable interface for clients.
 Keep prompts small and composable; use tools for data access.
 """
 from __future__ import annotations
-from typing import Any, Dict, List
+from typing import Any
 
-def _text_msg(text: str) -> Dict[str, Any]:
+
+def _text_msg(text: str) -> dict[str, Any]:
     return {"role": "assistant", "content": {"type": "text", "text": text}}
 
-async def get_askpanda_system_prompt() -> Dict[str, Any]:
+
+async def get_askpanda_system_prompt() -> dict[str, Any]:
     return {
         "messages": [
             _text_msg(
@@ -20,7 +22,8 @@ async def get_askpanda_system_prompt() -> Dict[str, Any]:
         ]
     }
 
-async def get_failure_triage_prompt(log_text: str) -> Dict[str, Any]:
+
+async def get_failure_triage_prompt(log_text: str) -> dict[str, Any]:
     return {
         "messages": [
             _text_msg(

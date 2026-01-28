@@ -1,4 +1,3 @@
-
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -43,68 +42,71 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+import textwrap
 import streamlit as st
 
-# --- UI tweaks: pin chat input to bottom and neutralize focus styling ---
-st.markdown(
-        """
-        <style>
-  /* ChatGPT-like pinned input at the bottom, but avoid overlapping the sidebar */
-  [data-testid="stChatInput"] {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 9999;
-    background: var(--background-color, #fff);
-    padding: 0.75rem 1rem 0.75rem 1rem;
-    border-top: none !important; /* remove separator line */
-    box-shadow: none !important;
-  }
-
-  /* When a sidebar is present, Streamlit typically reserves ~21rem on the left.
-     This prevents the input from sliding underneath the left panel. */
-  [data-testid="stChatInput"] {
-    padding-left: calc(1rem + 21rem);
-  }
-
-  /* On smaller screens (or when sidebar overlays), don't reserve left space. */
-  @media (max-width: 900px) {
-    [data-testid="stChatInput"] {
-      padding-left: 1rem;
-    }
-  }
-
-  /* Give the main content room so it doesn't hide behind the fixed input */
-  .block-container {
-    padding-bottom: 6.5rem !important;
-  }
-
-  /* Aggressively neutralize focus styles to avoid red borders/rings */
-  [data-testid="stChatInput"] *:focus,
-  [data-testid="stChatInput"] *:focus-visible {
-    outline: none !important;
-    box-shadow: none !important;
-  }
-
-  /* Ensure the textarea border stays neutral even on focus */
-  [data-testid="stChatInput"] textarea,
-  [data-testid="stChatInput"] input {
-    border-color: rgba(128,128,128,0.35) !important;
-  }
-  [data-testid="stChatInput"] textarea:focus,
-  [data-testid="stChatInput"] textarea:focus-visible,
-  [data-testid="stChatInput"] input:focus,
-  [data-testid="stChatInput"] input:focus-visible {
-    border-color: rgba(128,128,128,0.45) !important;
-  }
-</style>
-        """,
-        unsafe_allow_html=True,
-    )
 from interfaces.shared.mcp_client import MCPClientSync, MCPServerConfig
+
+# --- UI tweaks: pin chat input to bottom and neutralize focus styling ---
+_CHAT_CSS = textwrap.dedent(
+    """
+    <style>
+/* ChatGPT-like pinned input at the bottom, but avoid overlapping the sidebar */
+[data-testid="stChatInput"] {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9999;
+  background: var(--background-color, #fff);
+  padding: 0.75rem 1rem 0.75rem 1rem;
+  border-top: none !important; /* remove separator line */
+  box-shadow: none !important;
+}
+
+/* When a sidebar is present, Streamlit typically reserves ~21rem on the left.
+   This prevents the input from sliding underneath the left panel. */
+[data-testid="stChatInput"] {
+  padding-left: calc(1rem + 21rem);
+}
+
+/* On smaller screens (or when sidebar overlays), don't reserve left space. */
+@media (max-width: 900px) {
+  [data-testid="stChatInput"] {
+    padding-left: 1rem;
+  }
+}
+
+/* Give the main content room so it doesn't hide behind the fixed input */
+.block-container {
+  padding-bottom: 6.5rem !important;
+}
+
+/* Aggressively neutralize focus styles to avoid red borders/rings */
+[data-testid="stChatInput"] *:focus,
+[data-testid="stChatInput"] *:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Ensure the textarea border stays neutral even on focus */
+[data-testid="stChatInput"] textarea,
+[data-testid="stChatInput"] input {
+  border-color: rgba(128,128,128,0.35) !important;
+}
+[data-testid="stChatInput"] textarea:focus,
+[data-testid="stChatInput"] textarea:focus-visible,
+[data-testid="stChatInput"] input:focus,
+[data-testid="stChatInput"] input:focus-visible {
+  border-color: rgba(128,128,128,0.45) !important;
+}
+</style>
+    """
+)
+
+st.markdown(_CHAT_CSS, unsafe_allow_html=True)
 
 
 # -----------------------------

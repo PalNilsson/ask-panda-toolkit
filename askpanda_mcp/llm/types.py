@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, Sequence, TypedDict
+from typing import Any, Literal, Optional, TypedDict
 
 
 Role = Literal["system", "user", "assistant", "tool"]
