@@ -11,6 +11,7 @@ Run:
 from mcp.server.stdio import stdio_server
 from askpanda_mcp.core import create_server
 
+
 async def main():
     app = create_server()
     async with stdio_server() as (read_stream, write_stream):

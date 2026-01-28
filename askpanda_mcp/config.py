@@ -6,8 +6,10 @@ This skeleton intentionally keeps defaults safe:
 import os
 from dataclasses import dataclass
 
+
 @dataclass(frozen=True)
 class Config:
+    """Configuration for AskPanDA MCP Server."""
     SERVER_NAME: str = os.getenv("ASKPANDA_SERVER_NAME", "askpanda-mcp-server")
     SERVER_VERSION: str = os.getenv("ASKPANDA_SERVER_VERSION", "0.1.0")
 
