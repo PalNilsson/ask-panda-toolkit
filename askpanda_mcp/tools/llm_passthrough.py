@@ -9,24 +9,36 @@ Use-cases:
   2) Provide an explicit "bypass reasoning engine" path later, when the
      orchestration layer starts selecting tools.
 """
-
 from __future__ import annotations
 
-from typing import Any, Dict, List, Sequence
+from typing import Any
 
 from askpanda_mcp.prompts.templates import get_askpanda_system_prompt
-from askpanda_mcp.tools.base import text_content
+from askpanda_mcp.tools.base import text_content, coerce_messages
 
 from askpanda_mcp.llm.runtime import get_llm_manager, get_llm_selector
 from askpanda_mcp.llm.types import GenerateParams, Message
 
 
 class LLMPassthroughTool:
-    """Calls the default LLM with the full provided prompt."""
+    """Calls the default LLM with the full provided prompt.
+
+    This tool forwards either a provided `messages` chat history or a single
+    `question` string (wrapped as a user message) to the project's configured
+    default LLM profile. The raw text response from the model is returned as
+    a single text content block.
+    """
 
     @staticmethod
-    def get_definition() -> Dict[str, Any]:
-        """Returns the MCP tool definition."""
+    def get_definition() -> dict[str, Any]:
+        """Return the MCP tool discovery definition.
+
+        The returned mapping describes the tool's name, description and the
+        expected input schema so clients can discover and validate calls.
+
+        Returns:
+            Dict[str, Any]: Tool definition compatible with MCP discovery.
+        """
         return {
             "name": "askpanda_llm_answer",
             "description": (
@@ -68,14 +80,22 @@ class LLMPassthroughTool:
             },
         }
 
-    async def call(self, arguments: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Executes the passthrough call.
+    async def call(self, arguments: dict[str, Any]) -> list[dict[str, Any]]:
+        """Execute the passthrough call against the default LLM.
 
         Args:
-            arguments: Tool arguments.
+            arguments: Tool arguments; either a `messages` list or a `question`
+                string is required. Optional `temperature` and `max_tokens`
+                controls the generation parameters.
 
         Returns:
-            MCP text content containing the model response.
+            List[Dict[str, Any]]: A one-element list containing the model's
+            raw text response annotated with a debug header.
+
+        Raises:
+            ValueError: If neither `question` nor non-empty `messages` is provided.
+            RuntimeError: If the configured LLM selector does not expose a
+                registry or the manager cannot obtain a client.
         """
         selector = get_llm_selector()
         manager = get_llm_manager()
@@ -103,33 +123,20 @@ class LLMPassthroughTool:
         system_message: Message = {"role": "system", "content": str(sys_text or "")}
 
         messages_arg = arguments.get("messages")
-        messages: List[Message] = [system_message]
+        messages: list[Message] = [system_message]
         if isinstance(messages_arg, list) and messages_arg:
-            messages.extend(_coerce_messages(messages_arg))
+            messages.extend(coerce_messages(messages_arg))
         else:
             question = str(arguments.get("question", "")).strip()
             if not question:
                 raise ValueError("Either 'question' or non-empty 'messages' must be provided.")
             messages.append({"role": "user", "content": question})
 
-        resp = await client.generate(messages=messages, params=GenerateParams(temperature=temperature, max_tokens=max_tokens_int))
+        resp = await client.generate(
+            messages=messages,
+            params=GenerateParams(temperature=temperature, max_tokens=max_tokens_int),
+        )
         return text_content(f"{debug}\n\n{resp.text}")
-
-
-def _coerce_messages(raw: Sequence[Any]) -> List[Message]:
-    """Coerces a list of dict-like chat messages into normalized Message items."""
-    out: List[Message] = []
-    for item in raw:
-        if not isinstance(item, dict):
-            continue
-        role = str(item.get("role", "user"))
-        content = str(item.get("content", ""))
-        if not content:
-            continue
-        if role not in ("system", "user", "assistant", "tool"):
-            role = "user"
-        out.append({"role": role, "content": content})
-    return out
 
 
 askpanda_llm_answer_tool = LLMPassthroughTool()

@@ -7,7 +7,7 @@ initializes process-wide resources (LLM selection + client caching).
 from __future__ import annotations
 
 import inspect
-from typing import Any, Dict
+from typing import Any
 
 from mcp.server import Server
 from mcp.types import ListToolsResult, Tool
@@ -45,42 +45,53 @@ TOOLS = {
 }
 
 
-def create_server() -> Server:
-    """Creates and configures the MCP server.
+def create_server() -> Server:  # pylint: disable=too-complex
+    """Create and configure the MCP Server instance.
 
-    Returns:
-        Configured MCP Server instance.
+    This function wires up multi-LLM selection (model registry, selector, and
+    per-process LLM client manager), registers available tools and prompts on
+    the Server "app" instance, and publishes shared runtime state so tool
+    singletons can access it.
     """
-    app = Server(Config.SERVER_NAME)
+    app: Server = Server(Config.SERVER_NAME)
 
     # ---- Phase 0: initialize multi-LLM selection + per-process client cache ----
     # Support both Config being a class of constants or a dataclass-like type.
     try:
-        config_obj = Config()  # type: ignore[call-arg]
+        config_obj: Config | type[Config] = Config()  # type: ignore[call-arg]
     except TypeError:
-        config_obj = Config
+        config_obj = Config  # type: ignore[assignment]
 
-    model_registry = build_model_registry_from_config(config_obj)
-    llm_selector = LLMSelector(
+    model_registry: Any = build_model_registry_from_config(config_obj)
+    llm_selector: LLMSelector = LLMSelector(
         registry=model_registry,
         default_profile=getattr(config_obj, "LLM_DEFAULT_PROFILE", "default"),
         fast_profile=getattr(config_obj, "LLM_FAST_PROFILE", "fast"),
         reasoning_profile=getattr(config_obj, "LLM_REASONING_PROFILE", "reasoning"),
     )
-    llm_manager = LLMClientManager()
+    llm_manager: LLMClientManager = LLMClientManager()
 
     # Attach for visibility (HTTP shutdown handler can close these).
-    app.model_registry = model_registry  # type: ignore[attr-defined]
-    app.llm_selector = llm_selector      # type: ignore[attr-defined]
-    app.llm_manager = llm_manager        # type: ignore[attr-defined]
+    setattr(app, "model_registry", model_registry)
+    setattr(app, "llm_selector", llm_selector)
+    setattr(app, "llm_manager", llm_manager)
 
     # Also publish into runtime context so simple tool singletons can access it.
     set_llm_selector(llm_selector)
     set_llm_manager(llm_manager)
 
     @app.list_tools()
-    async def list_tools() -> Any:
-        defs = [tool.get_definition() for tool in TOOLS.values()]
+    async def list_tools() -> list[Tool] | ListToolsResult | list[dict[str, Any]]:
+        """Return the set of registered tools.
+
+        The MCP `Tool` representation may be a runtime model/class or a
+        TypedDict; handle both by inspecting the imported `Tool` symbol.
+
+        Returns:
+            Union[List[Tool], ListToolsResult, List[Dict[str, Any]]]: The tool
+            list in the appropriate shape for the MCP server/client contract.
+        """
+        defs: list[dict[str, Any]] = [tool.get_definition() for tool in TOOLS.values()]
 
         # If Tool is a real class/model, return Tool objects.
         if inspect.isclass(Tool):
@@ -94,14 +105,32 @@ def create_server() -> Server:
         return defs
 
     @app.call_tool()
-    async def call_tool(name: str, arguments: Dict[str, Any]) -> Any:
-        tool = TOOLS.get(name)
+    async def call_tool(name: str, arguments: dict[str, Any]) -> Any:
+        """Invoke a registered tool by name.
+
+        Args:
+            name: Name of the tool to call.
+            arguments: JSON-like mapping of arguments for the tool.
+
+        Returns:
+            Any: Result produced by the called tool.
+
+        Raises:
+            ValueError: If the requested tool name is unknown.
+        """
+        tool: Any | None = TOOLS.get(name)
         if not tool:
             raise ValueError(f"Unknown tool: {name}")
         return await tool.call(arguments or {})
 
     @app.list_prompts()
-    async def list_prompts() -> Any:
+    async def list_prompts() -> list[dict[str, Any]]:
+        """List available prompts and their metadata.
+
+        Returns:
+            List[Dict[str, Any]]: Each entry contains prompt `name`,
+            `description` and optional `arguments` specification.
+        """
         return [
             {"name": "askpanda_system", "description": "Core system prompt"},
             {
@@ -118,7 +147,19 @@ def create_server() -> Server:
         ]
 
     @app.get_prompt()
-    async def get_prompt(name: str, arguments: Dict[str, Any]) -> Any:
+    async def get_prompt(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Return the requested prompt payload.
+
+        Args:
+            name: Prompt name (e.g. 'askpanda_system' or 'failure_triage').
+            arguments: Arguments mapping used to fill template values.
+
+        Returns:
+            Dict[str, Any]: Prompt payload (typically a `messages` list).
+
+        Raises:
+            ValueError: If the requested prompt name is unknown.
+        """
         if name == "askpanda_system":
             return await get_askpanda_system_prompt()
         if name == "failure_triage":

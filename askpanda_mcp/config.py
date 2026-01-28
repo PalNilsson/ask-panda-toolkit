@@ -1,15 +1,37 @@
 """AskPanDA MCP Server configuration.
 
-This skeleton intentionally keeps defaults safe:
-- No external network calls unless explicitly enabled via env vars.
+This module defines a frozen dataclass `Config` that centralizes runtime
+configuration for the AskPanDA MCP server. Defaults are intentionally safe
+and driven by environment variables.
 """
+from __future__ import annotations
+
 import os
 from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
-class Config:
-    """Configuration for AskPanDA MCP Server."""
+class Config:  # pylint: disable=too-many-instance-attributes
+    """Configuration for AskPanDA MCP Server.
+
+    Attributes:
+        SERVER_NAME (str): Service name exposed to MCP clients.
+        SERVER_VERSION (str): Service version string.
+        ENABLE_REAL_PANDA (bool): Toggle real PanDA integration (off by default).
+        ENABLE_REAL_LLM (bool): Toggle real LLM integration (off by default).
+        KNOWLEDGE_BASE_PATH (str): Path to static knowledge base used for RAG.
+        QUEUE_DATA_PATH (str): Path to queue metadata (e.g. queuedata.json).
+        LLM_DEFAULT_PROFILE (str): Default LLM profile name.
+        LLM_FAST_PROFILE (str): Profile name used for fast (low-latency) LLMs.
+        LLM_REASONING_PROFILE (str): Profile name used for reasoning-heavy LLMs.
+        LLM_DEFAULT_PROVIDER (str): Default LLM provider id (e.g. "openai").
+        LLM_DEFAULT_MODEL (str): Default LLM model string.
+        LLM_FAST_PROVIDER (str): Provider id for fast profile.
+        LLM_FAST_MODEL (str): Fast model string.
+        LLM_REASONING_PROVIDER (str): Provider id for reasoning profile.
+        LLM_REASONING_MODEL (str): Reasoning model string.
+        OPENAI_COMPAT_BASE_URL (str): Optional OpenAI-compatible endpoint URL.
+    """
     SERVER_NAME: str = os.getenv("ASKPANDA_SERVER_NAME", "askpanda-mcp-server")
     SERVER_VERSION: str = os.getenv("ASKPANDA_SERVER_VERSION", "0.1.0")
 

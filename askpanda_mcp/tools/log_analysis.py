@@ -7,12 +7,28 @@ Later:
 - optionally call LLM for narrative summary
 """
 from __future__ import annotations
-from typing import Any, Dict, List
+from typing import Any
 from .base import text_content
 
+
 class PandaLogAnalysisTool:
+    """Dummy tool that analyzes a log snippet and returns a short summary.
+
+    The current implementation uses simple heuristics to classify the error and
+    suggest next steps. This is a placeholder for a richer pipeline that may
+    include log retrieval, parsing, and LLM-based summarization.
+    """
+
     @staticmethod
-    def get_definition() -> Dict[str, Any]:
+    def get_definition() -> dict[str, Any]:
+        """Return the tool discovery definition.
+
+        The returned dictionary includes the tool name, description and an
+        input schema describing expected arguments for clients.
+
+        Returns:
+            Dict[str, Any]: MCP-compatible tool discovery definition.
+        """
         return {
             "name": "panda_log_analysis",
             "description": "Analyze a job/task failure log snippet (dummy implementation).",
@@ -26,7 +42,17 @@ class PandaLogAnalysisTool:
             },
         }
 
-    async def call(self, arguments: Dict[str, Any]) -> List[Dict[str, Any]]:
+    async def call(self, arguments: dict[str, Any]) -> list[dict[str, Any]]:
+        """Analyze the provided log snippet and return a human-readable summary.
+
+        Args:
+            arguments: Mapping with keys ``log_text`` (required) and optional
+                ``context`` providing additional metadata.
+
+        Returns:
+            List[Dict[str, Any]]: A one-element text content list produced by
+            the ``text_content`` helper containing classification and advice.
+        """
         log_text = arguments.get("log_text", "")
         context = arguments.get("context", "")
         # Toy heuristics
@@ -45,12 +71,14 @@ class PandaLogAnalysisTool:
             advice = "Collect more context (error code, pilot error diag, site, release) and re-run with debug."
 
         return text_content(
-            "Log analysis (dummy)\n"
-            f"- context: {context or '(none)'}\n"
-            f"- classification: {classification}\n"
-            f"- suggested next step: {advice}\n\n"
-            "First 300 chars of log:\n"
-            + log_text[:300]
+            (
+                "Log analysis (dummy)\n"
+                f"- context: {context or '(none)'}\n"
+                f"- classification: {classification}\n"
+                f"- suggested next step: {advice}\n\n"
+                "First 300 chars of log:\n"
+            ) + log_text[:300]
         )
+
 
 panda_log_analysis_tool = PandaLogAnalysisTool()

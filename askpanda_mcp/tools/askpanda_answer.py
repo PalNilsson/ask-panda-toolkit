@@ -11,14 +11,16 @@ Initial routing rules:
 
 The selection rule "task <integer> must always be present" is enforced here so it
 is consistent across all clients.
+# pylint: disable=consider-using-alias
 """
 
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
+from collections.abc import Sequence
 
-from askpanda_mcp.tools.base import text_content
+from askpanda_mcp.tools.base import text_content, coerce_messages
 from askpanda_mcp.tools.llm_passthrough import askpanda_llm_answer_tool
 from askpanda_mcp.tools.task_status import panda_task_status_tool
 
@@ -26,14 +28,14 @@ from askpanda_mcp.tools.task_status import panda_task_status_tool
 _TASK_PATTERN = re.compile(r"\btask\s+(\d+)\b", re.IGNORECASE)
 
 
-def _extract_task_id(text: str) -> Optional[int]:
-    """Extracts a task ID from free text.
+def _extract_task_id(text: str) -> int | None:
+    """Extract a task ID from free text.
 
     Args:
         text: Free-form user question.
 
     Returns:
-        Task ID if found, otherwise None.
+        Optional[int]: Task ID if found, otherwise None.
     """
     m = _TASK_PATTERN.search(text or "")
     if not m:
@@ -44,33 +46,29 @@ def _extract_task_id(text: str) -> Optional[int]:
         return None
 
 
-def _coerce_messages(raw: Sequence[Any]) -> List[Dict[str, str]]:
-    """Coerces raw message objects into a list of {role, content} dicts.
-
-    Args:
-        raw: Sequence of dict-like objects.
-
-    Returns:
-        Normalized list of messages.
-    """
-    out: List[Dict[str, str]] = []
-    for item in raw:
-        if not isinstance(item, dict):
-            continue
-        role = str(item.get("role", "user"))
-        content = str(item.get("content", ""))
-        if not content:
-            continue
-        out.append({"role": role, "content": content})
-    return out
+def _coerce_messages(raw: Sequence[Any]) -> list[dict[str, str]]:
+    """Wrapper that delegates to shared coerce_messages helper."""
+    return coerce_messages(raw)
 
 
 class AskPandaAnswerTool:
-    """Top-level orchestration tool."""
+    """Top-level orchestration tool.
+
+    The tool routes incoming user prompts to more specific tools:
+    - If ``bypass_routing`` is True, forwards to the LLM passthrough tool.
+    - If the question contains a task id (e.g. "task 1234"), it delegates to
+      the task-status tool.
+    - Otherwise, it falls back to the LLM passthrough.
+    """
 
     @staticmethod
-    def get_definition() -> Dict[str, Any]:
-        """Returns the MCP tool definition."""
+    def get_definition() -> dict[str, Any]:
+        """Return the MCP tool discovery definition.
+
+        Returns:
+            Dict[str, Any]: Tool definition including input schema used by
+            MCP clients to validate and call this tool.
+        """
         return {
             "name": "askpanda_answer",
             "description": (
@@ -113,14 +111,24 @@ class AskPandaAnswerTool:
             },
         }
 
-    async def call(self, arguments: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Executes routing + delegation.
+    async def call(self, arguments: dict[str, Any]) -> list[dict[str, Any]]:
+        """Execute routing and delegation to the appropriate tool.
+
+        This method implements the orchestration policies described in the
+        module docstring.
 
         Args:
-            arguments: Tool arguments.
+            arguments: Mapping that should include either a ``question`` string
+                or a non-empty ``messages`` list. Optional flags:
+                ``bypass_routing`` (bool) and ``include_raw`` (bool).
 
         Returns:
-            MCP text content containing the final answer (prefixed with tool used).
+            List[Dict[str, Any]]: MCP content list (text payload) produced by
+            the delegated tool, wrapped with a short prefix indicating which
+            tool was used.
+
+        Raises:
+            ValueError: If neither a question nor non-empty messages are provided.
         """
         question = str(arguments.get("question", "") or "").strip()
         messages_raw = arguments.get("messages") or []
@@ -139,7 +147,7 @@ class AskPandaAnswerTool:
                     break
 
         tool_used: str
-        delegated: List[Dict[str, Any]]
+        delegated: list[dict[str, Any]]
 
         if bypass:
             tool_used = "askpanda_llm_answer"
@@ -164,7 +172,7 @@ class AskPandaAnswerTool:
         try:
             if delegated and isinstance(delegated[0], dict):
                 body = str(delegated[0].get("text", ""))
-        except Exception:
+        except (IndexError, TypeError, KeyError):
             body = str(delegated)
 
         return text_content(f"[tool={tool_used}]\n\n{body}".strip())

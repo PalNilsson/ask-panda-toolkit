@@ -9,11 +9,19 @@ The tool is intended to be selected when the user prompt contains the substring
 
 from __future__ import annotations
 
+# The task status tool contains several small helpers and branching logic.
+# We keep a targeted set of pylint disables for complex logic that would
+# require a larger refactor to split further.
+# pylint: disable=too-complex,too-many-nested-blocks,consider-using-alias
+
+import asyncio
+import json
 import os
 import re
 from collections import Counter, deque
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Dict, Mapping, Optional, Tuple
+from typing import Any, List
 
 import httpx
 
@@ -30,13 +38,13 @@ class TaskSummary:
     task_id: int
     status: str
     job_counts: Mapping[str, int]
-    error_codes: Tuple[int, ...]
-    error_diags: Tuple[str, ...]
+    error_codes: tuple[int, ...]
+    error_diags: tuple[str, ...]
     monitor_url: str
 
 
 def _panda_base_url() -> str:
-    """Returns the PanDA monitor base URL.
+    """Return the PanDA monitor base URL.
 
     You can override the default using the environment variable `PANDA_BASE_URL`.
 
@@ -46,8 +54,8 @@ def _panda_base_url() -> str:
     return os.getenv("PANDA_BASE_URL", "https://bigpanda.cern.ch").rstrip("/")
 
 
-def extract_task_id_from_text(text: str) -> Optional[int]:
-    """Extracts a task ID from a user prompt.
+def extract_task_id_from_text(text: str) -> int | None:
+    """Extract a task ID from a user prompt.
 
     Args:
         text: Free-form user prompt.
@@ -64,7 +72,7 @@ def extract_task_id_from_text(text: str) -> Optional[int]:
         return None
 
 
-async def _fetch_task_metadata(task_id: int, *, timeout_s: float = 30.0) -> Dict[str, Any]:
+async def _fetch_task_metadata(task_id: int, *, timeout_s: float = 30.0) -> dict[str, Any]:
     """Fetch task metadata JSON from PanDA monitor.
 
     Uses the endpoint:
@@ -88,7 +96,7 @@ async def _fetch_task_metadata(task_id: int, *, timeout_s: float = 30.0) -> Dict
     retries = int(os.getenv("ASKPANDA_PANDA_RETRIES", "2"))
     backoff = float(os.getenv("ASKPANDA_PANDA_BACKOFF_SECONDS", "0.8"))
 
-    last_exc: Optional[Exception] = None
+    last_exc: Exception | None = None
     for attempt in range(retries + 1):
         try:
             async with httpx.AsyncClient(timeout=timeout_s, follow_redirects=True) as client:
@@ -98,52 +106,33 @@ async def _fetch_task_metadata(task_id: int, *, timeout_s: float = 30.0) -> Dict
                 if not isinstance(data, dict):
                     raise ValueError(f"Unexpected JSON type: {type(data)}")
                 return data
-        except Exception as exc:  # noqa: BLE001
+        except (httpx.HTTPError, ValueError) as exc:
             last_exc = exc
             if attempt >= retries:
                 raise
             # simple exponential backoff
-            import asyncio
             await asyncio.sleep(backoff * (2 ** attempt))
 
     assert last_exc is not None
     raise last_exc  # pragma: no cover
 
 
-def _summarize_task(task_id: int, payload: Mapping[str, Any]) -> TaskSummary:
-    """Builds a compact TaskSummary from PanDA task metadata JSON.
-
-    Args:
-        task_id: PanDA task ID.
-        payload: The JSON payload returned by the monitor.
-
-    Returns:
-        TaskSummary.
-    """
-    base = _panda_base_url()
-    monitor_url = f"{base}/task/{task_id}/"
-
-    # Best-effort: field names can vary a bit across monitor versions
-    task_info = None
+def _extract_task_info(payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """Extract task info dict from possibly varied payload shapes."""
     if isinstance(payload.get("task"), list) and payload.get("task"):
         if isinstance(payload["task"][0], dict):
-            task_info = payload["task"][0]
-    elif isinstance(payload.get("task"), dict):
-        task_info = payload.get("task")
+            return payload["task"][0]
+    if isinstance(payload.get("task"), dict):
+        return payload.get("task")
+    return None
 
-    status = str(
-        (task_info or {}).get("taskstatus")
-        or (task_info or {}).get("status")
-        or payload.get("taskstatus")
-        or payload.get("status")
-        or "unknown"
-    )
 
+def _process_jobs(jobs: Any) -> tuple[dict[str, int], tuple[int, ...], tuple[str, ...]]:
+    """Process jobs list and return (job_counts, error_codes, error_diags)."""
     job_counts: Counter[str] = Counter()
     error_codes: deque[int] = deque(maxlen=50)
     error_diags: deque[str] = deque(maxlen=20)
 
-    jobs = payload.get("jobs")
     if isinstance(jobs, list):
         for job in jobs:
             if not isinstance(job, dict):
@@ -159,12 +148,12 @@ def _summarize_task(task_id: int, payload: Mapping[str, Any]) -> TaskSummary:
                         iv = int(v)
                         if iv > 0:
                             error_codes.append(iv)
-                    except Exception:
+                    except (ValueError, TypeError):
                         pass
                 if "errordiag" in lk and isinstance(v, str) and v.strip():
                     error_diags.append(v.strip())
 
-    # De-duplicate diags while preserving order (first occurrences)
+    # De-duplicate diags while preserving order
     seen = set()
     uniq_diags = []
     for d in error_diags:
@@ -173,18 +162,100 @@ def _summarize_task(task_id: int, payload: Mapping[str, Any]) -> TaskSummary:
         seen.add(d)
         uniq_diags.append(d)
 
+    return dict(job_counts), tuple(error_codes), tuple(uniq_diags)
+
+
+def _summarize_task(task_id: int, payload: Mapping[str, Any]) -> TaskSummary:
+    """Build a compact TaskSummary from PanDA task metadata JSON.
+
+    Args:
+        task_id: PanDA task ID.
+        payload: The JSON payload returned by the monitor.
+
+    Returns:
+        TaskSummary.
+    """
+    base = _panda_base_url()
+    monitor_url = f"{base}/task/{task_id}/"
+
+    task_info = _extract_task_info(payload)
+
+    status = _try_status(
+        (task_info or {}).get("taskstatus"),
+        (task_info or {}).get("status"),
+        payload.get("taskstatus"),
+        payload.get("status"),
+    )
+
+    job_counts, error_codes, uniq_diags = _process_jobs(payload.get("jobs"))
+
     return TaskSummary(
         task_id=task_id,
         status=status,
-        job_counts=dict(job_counts),
-        error_codes=tuple(error_codes),
-        error_diags=tuple(uniq_diags),
+        job_counts=job_counts,
+        error_codes=error_codes,
+        error_diags=uniq_diags,
         monitor_url=monitor_url,
     )
 
 
+def _try_status(*candidates: Any) -> str:
+    """Return the first non-empty candidate as string, or 'unknown'."""
+    for cand in candidates:
+        if cand:
+            return str(cand)
+    return "unknown"
+
+
+def _format_job_counts(job_counts: Mapping[str, int]) -> list[str]:
+    """Format job_counts mapping into human-readable lines."""
+    lines: List[str] = []
+    if job_counts:
+        lines.append("Job counts:")
+        for k, v in sorted(job_counts.items(), key=lambda kv: (-kv[1], kv[0])):
+            lines.append(f"- {k}: {v}")
+    else:
+        lines.append("Job counts: (not available in metadata)")
+    return lines
+
+
+def _format_error_codes_and_diags(error_codes: tuple[int, ...], error_diags: tuple[str, ...]) -> list[str]:
+    """Format recent error codes and diagnostics into lines."""
+    lines: List[str] = []
+    if error_codes:
+        lines.append("Recent error codes (sample):")
+        counts = Counter(error_codes)
+        for code, cnt in counts.most_common(10):
+            lines.append(f"- {code}: {cnt}")
+        lines.append("")
+    if error_diags:
+        lines.append("Recent error diagnostics (sample):")
+        for d in error_diags[:10]:
+            d1 = d.replace("\n", " ").strip()
+            if len(d1) > 400:
+                d1 = d1[:400] + "..."
+            lines.append(f"- {d1}")
+        lines.append("")
+    return lines
+
+
+def _format_payload_debug(payload: Any) -> list[str]:
+    """Return a short debug representation of the payload (keys + snippet)."""
+    lines: List[str] = []
+    if isinstance(payload, dict):
+        lines.append(f"Payload keys: {sorted(payload.keys())}")
+    try:
+        raw = json.dumps(payload, indent=2)
+        lines.append("\nRaw payload (snippet):\n")
+        lines.append(raw[:5000])
+    except (TypeError, ValueError):
+        # If serialization fails, ignore the raw payload snippet.
+        pass
+    return lines
+
+
 class PandaTaskStatusTool:
-    """MCP tool that returns a summary for a PanDA task.
+    """Provide an MCP tool that returns a summary for a PanDA task.
 
     Input:
         - task_id (int) OR
@@ -195,8 +266,8 @@ class PandaTaskStatusTool:
     """
 
     @staticmethod
-    def get_definition() -> Dict[str, Any]:
-        """Returns the MCP tool definition."""
+    def get_definition() -> dict[str, Any]:
+        """Return the MCP tool definition."""
         return {
             "name": "panda_task_status",
             "description": (
@@ -221,8 +292,8 @@ class PandaTaskStatusTool:
             },
         }
 
-    async def call(self, arguments: Dict[str, Any]) -> Any:
-        """Executes the tool.
+    async def call(self, arguments: dict[str, Any]) -> Any:
+        """Execute the tool.
 
         Args:
             arguments: Tool arguments.
@@ -251,7 +322,7 @@ class PandaTaskStatusTool:
                 f"Error: PanDA monitor returned HTTP {exc.response.status_code} for task {task_id}.\n"
                 f"URL: {_panda_base_url()}/task/{task_id}/?json"
             )
-        except Exception as exc:  # noqa: BLE001
+        except httpx.HTTPError as exc:
             return text_content(f"Error: failed to fetch task metadata for task {task_id}: {exc}")
 
         summary = _summarize_task(int(task_id), payload)
@@ -271,57 +342,23 @@ class PandaTaskStatusTool:
             )
             # Always show top-level keys for debugging.
             if isinstance(payload, dict):
-                lines.append(f"Payload keys: {sorted(payload.keys())}")
-            # Show raw payload snippet to aid debugging.
-            try:
-                import json as _json
-                raw = _json.dumps(payload, indent=2)
-                lines.append("\nRaw payload (snippet):\n")
-                lines.append(raw[:5000])
-            except Exception:
-                pass
+                lines.extend(_format_payload_debug(payload))
             return text_content("\n".join(lines))
 
         lines.append(f"Task {summary.task_id}")
         lines.append(f"Status: {summary.status}")
         lines.append(f"Monitor: {summary.monitor_url}")
         lines.append("")
-        if summary.job_counts:
-            lines.append("Job counts:")
-            for k, v in sorted(summary.job_counts.items(), key=lambda kv: (-kv[1], kv[0])):
-                lines.append(f"- {k}: {v}")
-        else:
-            lines.append("Job counts: (not available in metadata)")
+
+        lines.extend(_format_job_counts(summary.job_counts))
         lines.append("")
 
-        if summary.error_codes:
-            lines.append("Recent error codes (sample):")
-            counts = Counter(summary.error_codes)
-            for code, cnt in counts.most_common(10):
-                lines.append(f"- {code}: {cnt}")
-            lines.append("")
-        if summary.error_diags:
-            lines.append("Recent error diagnostics (sample):")
-            for d in summary.error_diags[:10]:
-                # Keep output readable
-                d1 = d.replace("\n", " ").strip()
-                if len(d1) > 400:
-                    d1 = d1[:400] + "..."
-                lines.append(f"- {d1}")
-            lines.append("")
+        lines.extend(_format_error_codes_and_diags(summary.error_codes, summary.error_diags))
+
         if not include_raw and summary.status == "unknown" and isinstance(payload, dict):
-            lines.append(f"Payload keys: {sorted(payload.keys())}")
-            # If task info exists, show its keys too.
-            ti = None
-            if isinstance(payload.get("task"), list) and payload.get("task") and isinstance(payload["task"][0], dict):
-                ti = payload["task"][0]
-            elif isinstance(payload.get("task"), dict):
-                ti = payload.get("task")
-            if isinstance(ti, dict):
-                lines.append(f"Task block keys: {sorted(ti.keys())}")
+            lines.extend(_format_payload_debug(payload))
 
         if include_raw:
-            import json
             lines.append("Raw payload:\n")
             lines.append(json.dumps(payload, indent=2)[:200000])  # guard against extreme size
 
