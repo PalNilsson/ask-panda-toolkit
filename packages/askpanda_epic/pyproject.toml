@@ -1,0 +1,18 @@
+[project]
+name = "askpanda_epic"
+version = "0.0.1"
+description = "EPIC / EIC AskPanDA plugin (placeholder)"
+requires-python = ">=3.11"
+dependencies = [
+  "requests>=2.0",
+]
+
+[project.entry-points."bamboo.tools"]
+"askpanda_epic.placeholder" = "askpanda_epic.placeholder:tool"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["askpanda_epic"]

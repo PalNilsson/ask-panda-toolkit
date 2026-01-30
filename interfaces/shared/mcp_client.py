@@ -53,7 +53,7 @@ class MCPServerConfig:
     Attributes:
         transport: "stdio" (spawn local server) or "http" (connect to HTTP endpoint).
         stdio_command: Executable for stdio server (typically sys.executable).
-        stdio_args: Args for stdio server (e.g., ["-m", "askpanda_mcp.server"]).
+        stdio_args: Args for stdio server (e.g., ["-m", "bamboo.server"]).
         stdio_env: Optional environment overrides for stdio server.
         http_url: Streamable HTTP endpoint URL (e.g., "http://localhost:8000/mcp").
         http_headers: Optional headers (auth, etc.) for HTTP transport.
@@ -65,7 +65,7 @@ class MCPServerConfig:
 
     # stdio options
     stdio_command: str = field(default_factory=lambda: sys.executable)
-    stdio_args: List[str] = field(default_factory=lambda: ["-m", "askpanda_mcp.server"])
+    stdio_args: List[str] = field(default_factory=lambda: ["-m", "bamboo.server"])
     stdio_env: Optional[Dict[str, str]] = None
 
     # http options

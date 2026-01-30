@@ -13,7 +13,7 @@ deployment modes (stdio MCP and HTTP Streamable MCP).
 ## Repository Layout
 
 ```
-askpanda_mcp/
+bamboo/
   core.py                       # MCP server + tool registration
   server.py                     # stdio MCP entrypoint
   entrypoints/http.py           # ASGI Streamable HTTP MCP entrypoint
@@ -90,7 +90,7 @@ You can run AskPanDA in **stdio mode** or **HTTP (Streamable MCP) mode**.
 
 ```bash
 export PYTHONPATH=$PWD
-python -m askpanda_mcp.server
+python -m bamboo.server
 ```
 
 This mode is useful for:
@@ -105,13 +105,13 @@ This is required for Streamlit, Open WebUI, and Kubernetes deployments.
 
 ```bash
 export PYTHONPATH=$PWD
-uvicorn askpanda_mcp.entrypoints.http:app --host 0.0.0.0 --port 8000
+uvicorn bamboo.entrypoints.http:app --host 0.0.0.0 --port 8000
 ```
 
 Recommended dev flags:
 
 ```bash
-uvicorn askpanda_mcp.entrypoints.http:app \
+uvicorn bamboo.entrypoints.http:app \
   --host 0.0.0.0 \
   --port 8000 \
   --reload \

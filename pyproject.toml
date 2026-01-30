@@ -14,4 +14,10 @@ package-dir = {"" = "."}
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["askpanda_mcp*"]
+include = ["bamboo*"]
+
+[tool.askpanda]
+default_namespace = "atlas"
+
+[project.entry-points."askpanda.tools"]
+"atlas.task_status" = "bamboo.tools.task_status_atlas:panda_task_status_tool"

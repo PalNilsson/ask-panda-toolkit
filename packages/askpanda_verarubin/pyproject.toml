@@ -1,0 +1,18 @@
+[project]
+name = "askpanda_epic"
+version = "0.0.1"
+description = "Vera Rubin AskPanDA plugin (placeholder)"
+requires-python = ">=3.11"
+dependencies = [
+  "requests>=2.0",
+]
+
+[project.entry-points."bamboo.tools"]
+"askpanda_verarubin.placeholder" = "askpanda_verarubin.placeholder:tool"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["askpanda_verarubin"]

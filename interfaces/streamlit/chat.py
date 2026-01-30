@@ -19,7 +19,7 @@
 AskPanDA Streamlit Chat UI (MCP-first)
 
 This Streamlit app connects to an AskPanDA MCP server using either:
-  - STDIO transport (dev): spawns `python -m askpanda_mcp.server`
+  - STDIO transport (dev): spawns `python -m bamboo.server`
   - Streamable HTTP transport (prod): connects to `http://host:port/mcp`
 
 Key Streamlit constraints handled here:
@@ -149,7 +149,7 @@ def _safe_parse_json_list(value: str, fallback: Optional[List[str]] = None) -> L
         A list of strings.
     """
     if fallback is None:
-        fallback = ["-m", "askpanda_mcp.server"]
+        fallback = ["-m", "bamboo.server"]
     try:
         parsed = json.loads(value)
         if not isinstance(parsed, list):
@@ -406,9 +406,9 @@ def _sidebar_config() -> UIConfig:
     stdio_command = sys.executable
     stdio_args_json = st.sidebar.text_area(
         "STDIO args (JSON list)",
-        value=json.dumps(["-m", "askpanda_mcp.server"]),
+        value=json.dumps(["-m", "bamboo.server"]),
         height=70,
-        help='Example: ["-m", "askpanda_mcp.server"]',
+        help='Example: ["-m", "bamboo.server"]',
     )
 
     stdio_env_json = st.sidebar.text_area(

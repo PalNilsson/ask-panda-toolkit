@@ -1,0 +1,11 @@
+[project]
+name = "cgsim"
+version = "0.0.1"
+description = "CGSim plugin"
+requires-python = ">=3.11"
+
+[project.dependencies]
+requests = "*"
+
+# [project.entry-points."bamboo.tools"]
+# "cgsim.task_status" = "cgsim.task_status:cgsim_task_status_tool"
