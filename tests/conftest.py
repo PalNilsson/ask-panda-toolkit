@@ -1,0 +1,29 @@
+"""Pytest configuration.
+
+These tests are designed to work both when Bamboo is installed (editable or
+wheel) and when running directly from a source checkout.
+
+In a clean checkout, the `bamboo` (core) and `askpanda_atlas` (plugin) packages
+live under `core/` and `packages/askpanda_atlas/` respectively. Add these
+directories to `sys.path` so `pytest` can import them without requiring an
+editable install.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+
+def pytest_configure() -> None:
+    """Configure sys.path for local-source test runs."""
+
+    repo_root = Path(__file__).resolve().parents[1]
+
+    core_dir = repo_root / "core"
+    atlas_pkg_dir = repo_root / "packages" / "askpanda_atlas"
+
+    for p in (core_dir, atlas_pkg_dir):
+        s = str(p)
+        if s not in sys.path:
+            sys.path.insert(0, s)

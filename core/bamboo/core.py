@@ -28,6 +28,7 @@ from bamboo.tools.log_analysis import panda_log_analysis_tool
 from bamboo.tools.pilot_monitor import panda_pilot_status_tool
 from bamboo.tools.llm_passthrough import askpanda_llm_answer_tool
 from bamboo.tools.askpanda_answer import askpanda_answer_tool
+from bamboo.tools.planner import bamboo_plan_tool
 from bamboo.prompts.templates import (
     get_askpanda_system_prompt,
     get_failure_triage_prompt,
@@ -37,6 +38,7 @@ TOOLS = {
     "askpanda_health": askpanda_health_tool,
     "askpanda_llm_answer": askpanda_llm_answer_tool,
     "askpanda_answer": askpanda_answer_tool,
+    "bamboo_plan": bamboo_plan_tool,
     "panda_doc_search": panda_doc_search_tool,
     "panda_queue_info": panda_queue_info_tool,
     "panda_task_status": panda_task_status_tool,

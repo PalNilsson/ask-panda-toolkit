@@ -1,38 +1,14 @@
-# MCP server and LLM internals
+# MCP workflow, tool orchestration, and LLM usage
 
-This document explains how the MCP (Message / Model / Plugin Coordinator) server processes a prompt such as:
+## What MCP provides
 
-> “What happened to task 123456?”
+Bamboo runs an MCP server (HTTP) that publishes a catalog of tools and executes tool calls.
 
-## High-level flow
-
-1. Client sends a prompt to MCP
-2. MCP selects and validates a tool
-3. Tool executes and returns structured evidence
-4. LLM (optional) summarizes evidence
-5. MCP returns answer + evidence
-
-## Tool-first architecture
-
-- Tools are authoritative and produce **evidence**
-- LLMs summarize, explain, and format tool output
-- Evidence is always returned to make answers auditable
-
-## Typical request
-
-```http
-POST /mcp/tools/call
-Content-Type: application/json
-
-{
-  "query": "What happened to task 123456?",
-  "namespace": "atlas"
-}
-```
+MCP does not require an LLM to choose tools. Tool selection can happen in the client, in the server, or both.
 
 ## Tool discovery
 
-Tools are discovered via Python entry points in the `bamboo.tools` group (with optional legacy fallback to `askpanda.tools`).
+Tools are discovered via Python entry points in the `bamboo.tools` group (with an optional legacy fallback to `askpanda.tools`).
 
 Example entry point:
 
@@ -45,32 +21,83 @@ Example entry point:
 
 Each tool provides:
 
-- `get_definition()` returning a dict with an `inputSchema`
-- `async call(arguments)` returning `{"text": "...", "evidence": {...}}`
+- `get_definition() -> dict` including an `inputSchema` (JSON Schema)
+- `async call(arguments: dict) -> dict` returning:
 
-## LLM integration (latest guidance)
+```json
+{
+  "text": "Human summary",
+  "evidence": {"structured": "data"}
+}
+```
 
-LLMs are invoked **after** tool execution.
+Tools are authoritative and produce evidence. Any LLM output is presentation-only.
 
-Input to the LLM should include:
-- the original user question
-- the tool’s structured evidence
-- explicit instructions such as:
-  - do not invent facts
-  - reference monitor URLs
-  - keep the summary concise
-  - suggest next actions only when supported by evidence
+## Orchestration model
 
-The LLM is treated as a presentation layer; evidence remains the source of truth.
+Bamboo supports two complementary orchestration styles:
 
-## Error handling (recommended)
+1. **Client-driven**: an MCP client can read `/tools/list` and let a host LLM choose tools.
+2. **Server-driven (Bamboo hybrid router)**: Bamboo can route requests itself, using deterministic rules first and an LLM planner only when needed.
 
-- 400: invalid arguments / schema validation failure
-- 404: no suitable tool found
-- 502: tool failure, timeout, or upstream service error
+### Step 1: Argument extraction
+
+Deterministically extract hints from the user query (for example `task_id`, `job_id`, `site`). These hints are passed to routing and (optionally) to the planner.
+
+### Step 2: Fast-path routing (deterministic)
+
+If the hints are unambiguous, Bamboo directly selects a tool and validates arguments against the tool’s `inputSchema`.
+
+### Step 3: Planner routing (conditional)
+
+If intent is ambiguous or the query requires a multi-step workflow, Bamboo can call the **planner tool**:
+
+- MCP tool name: `bamboo_plan`
+- Implementation: `core/bamboo/tools/planner.py`
+
+The planner proposes a **plan object** (JSON) describing which tools to call and with what arguments. The plan is validated before execution.
+
+## Planner prompt sketch
+
+The planner uses two messages.
+
+**System prompt (conceptual):**
+
+- You are a tool planner for an MCP server.
+- Output MUST be a single JSON object.
+- Output MUST validate against the provided JSON Schema.
+- Do not wrap output in Markdown.
+- Only propose tools present in the provided tool catalog.
+
+**User message (payload):**
+
+```json
+{
+  "question": "...",
+  "hints": {"task_id": 123456},
+  "tools": [
+    {"name": "panda_task_status", "description": "...", "inputSchema": {}},
+    {"name": "panda_log_analysis", "description": "...", "inputSchema": {}}
+  ]
+}
+```
+
+## Plan JSON Schema
+
+The authoritative schema is generated from the Pydantic model in `bamboo.tools.planner`:
+
+```python
+from bamboo.tools.planner import get_plan_json_schema
+
+schema = get_plan_json_schema()
+```
+
+The planner extracts the first JSON object from the model output, validates it, and performs at most one repair attempt.
+
+## LLM summarization
+
+LLMs are invoked **after** tool execution. Input to the summarizer should include the original question and the structured evidence, plus rules such as “do not invent facts”. The LLM is treated as a presentation layer.
 
 ## Sequence diagram
 
-An example of the MCP request flow: what happens when a client sends a prompt to the MCP server.
-
-<img src="images/Mermaid_sequence_diagram.png" alt="Diagram" width="100%" />
+<img src="images/mcp_sequence_diagram.png" alt="Diagram" width="100%" />
