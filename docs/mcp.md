@@ -73,4 +73,4 @@ The LLM is treated as a presentation layer; evidence remains the source of truth
 
 An example of the MCP request flow: what happens when a client sends a prompt to the MCP server.
 
-<img src="images/Mermaid_sequence_diagram.png" alt="Diagram" width="400" />
+<img src="images/Mermaid_sequence_diagram.png" alt="Diagram" width="100%" />
